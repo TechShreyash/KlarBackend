@@ -1,4 +1,5 @@
 import logging
+from utils import db
 from utils.schemas import InvoiceExtractionSchema
 from utils.vendors import get_or_create_vendor_id
 
@@ -18,7 +19,6 @@ async def handle_processed_result(
         )
 
         # --- New Vendor Canonicalization Step ---
-        # This is the robust way to handle new vendors.
         final_vendor_id = data.canonical_vendor_id
 
         if final_vendor_id is None and data.extracted_vendor_name:
@@ -26,19 +26,8 @@ async def handle_processed_result(
             logger.info(
                 f"[Task {task_id}] No canonical_vendor_id found. Attempting to get/create ID for '{data.extracted_vendor_name}'"
             )
-            try:
-                final_vendor_id = await get_or_create_vendor_id(
-                    data.extracted_vendor_name
-                )
-                # Update the object before saving
-                data.canonical_vendor_id = final_vendor_id
-            except Exception as e:
-                logger.error(
-                    f"[Task {task_id}] Error during vendor creation for '{data.extracted_vendor_name}': {e}"
-                )
-                # Flag for review
-                data.human_verification_required = True
-                data.human_verification_reason = f"Failed to create new vendor: {e}"
+            final_vendor_id = await get_or_create_vendor_id(data.extracted_vendor_name)
+            data.canonical_vendor_id = final_vendor_id
 
         elif final_vendor_id is None:
             logger.warning(
@@ -47,16 +36,18 @@ async def handle_processed_result(
             data.human_verification_required = True
             data.human_verification_reason = "Missing vendor name and ID."
 
-        # --- Your Database & HIL Logic ---
-
-        # 1. Save the final, updated data to your database
-        # E.g.: await db.save_invoice_data(task_id, data.model_dump())
+        # save to db
         logger.info(f"[Task {task_id}] Saving processed data to database...")
-        # (Your DB save logic here)
+        await db.update_invoice(task_id, data.model_dump())
         logger.info(f"[Task {task_id}] Data for {data.invoice_id} saved.")
-
-        logger.info(data)
 
     elif status == "ERROR":
         logger.error(f"[Task {task_id}] Processing FAILED. Error: {data}")
-        # E.g.: await db.log_error(task_id, str(data))
+
+        await db.update_invoice(
+            task_id,
+            {
+                "human_verification_required": True,
+                "human_verification_reason": data,
+            },
+        )

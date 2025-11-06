@@ -5,8 +5,9 @@ from typing import List, Tuple
 import uuid
 
 import config
+from utils import db
 from utils.extractor import InvoiceExtractor
-from utils.resultsProcessor import handle_processed_result
+from utils.postProcessor import handle_processed_result
 from utils.schemas import InvoiceExtractionSchema
 from utils.vendors import get_current_vendors
 
@@ -49,6 +50,7 @@ async def add_task_to_queue(pdf_path_str: str) -> str:
     task = (task_id, pdf_path)
 
     await task_queue.put(task)
+    await db.add_invoice({"task_id": task_id, "pdf_path": pdf_path_str})
     logger.info(f"[Task {task_id}] Added to queue: {pdf_path.name}")
     return task_id
 

@@ -25,7 +25,7 @@ class InvoiceExtractor:
 
     def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
         # This synchronously sets up the client configuration
-        self.client = genai.Client(api_key=api_key)
+        self.client = genai.Client(api_key=api_key).aio
         self.model = model_name
         self.json_schema = InvoiceExtractionSchema.model_json_schema()
 
@@ -63,15 +63,14 @@ class InvoiceExtractor:
         response_text = None
 
         try:
-            async with self.client.aio as aclient:
-                response = await aclient.models.generate_content(
-                    model=self.model,
-                    contents=[invoice_file, prompt],
-                    config={
-                        "response_mime_type": "application/json",
-                        "response_schema": self.json_schema,
-                    },
-                )
+            response = await self.client.models.generate_content(
+                model=self.model,
+                contents=[invoice_file, prompt],
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": self.json_schema,
+                },
+            )
 
             if not response or not response.text:
                 raise Exception("No response text received from the API.")
