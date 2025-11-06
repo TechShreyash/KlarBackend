@@ -4,85 +4,116 @@ import logging
 import os
 import pathlib
 import uuid
+from contextlib import asynccontextmanager
+from typing import List
 
 import aiofiles
 from fastapi.responses import FileResponse
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr, Field
 
 from utils import db
+from utils.auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
 from utils.logging_config import setup_logging
 from utils.queueHandler import add_task_to_queue, run_service
-import uvicorn
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-from typing import List
 from utils.schemas import InvoiceResponseModel
-
+import config
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
-# --- Lifespan Function ---
-# This function manages the application's startup and shutdown events.
+# Auth schemas
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=256)  # allow long passphrase
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=256)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+# Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Handles application startup and shutdown events.
-    Connects to MongoDB on startup and disconnects on shutdown.
-    """
-    print("Application startup...")
+    logger.info("Application startup...")
+    await db.ensure_user_indexes()
     asyncio.create_task(run_service())
-
     yield
+    logger.info("Application shutdown...")
 
 
-# --- FastAPI App Initialization ---
 app = FastAPI(
     title="Invoice Processing API",
     description="API for processing and retrieving invoices.",
     lifespan=lifespan,
 )
 
-# --- CORS (Cross-Origin Resource Sharing) ---
-# This allows your frontend (e.g., a React app) to call this API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# --- API Routes ---
+
+# Auth routes
+@app.post("/auth/signup", response_model=TokenResponse, tags=["auth"])
+async def signup(payload: SignupRequest):
+    existing = await db.get_user_by_email(payload.email)
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    hashed = hash_password(payload.password)
+    await db.create_user(payload.email, hashed)
+    token = create_access_token(subject=payload.email.lower())
+    return TokenResponse(access_token=token)
 
 
+@app.post("/auth/login", response_model=TokenResponse, tags=["auth"])
+async def login(payload: LoginRequest):
+    user = await db.get_user_by_email(payload.email)
+    if (not user) or (
+        not verify_password(payload.password, user.get("password_hash", ""))
+    ):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_access_token(subject=user["email"])
+    return TokenResponse(access_token=token)
+
+
+# Root
 @app.get("/")
 async def get_root():
-    """
-    Root endpoint to check if the API is running.
-    """
     return {"message": "Invoice API is running!"}
 
 
-@app.get("/getInvoices", response_model=List[InvoiceResponseModel])
-async def get_invoices(request: Request):
-    """
-    Retrieves all invoice documents from the MongoDB collection.
-    """
-    # Access the database collection from the app state
-    invoices = await db.get_all_invoices(auth_email=request.headers["auth_email"])
+# Invoice routes (protected)
+@app.get("/getInvoices", response_model=List[InvoiceResponseModel], tags=["invoices"])
+async def get_invoices(current_email: str = Depends(get_current_user)):
+    invoices = await db.get_all_invoices(auth_email=current_email)
     return invoices
 
 
-@app.get("/invoice_details/{task_id}", response_model=InvoiceResponseModel)
-async def get_invoice_details(task_id: str, request: Request):
-    """
-    Retrieves details of a specific invoice by its task ID.
-    """
-    invoice = await db.get_invoice_by_task_id(
-        task_id, auth_email=request.headers["auth_email"]
-    )
+@app.get(
+    "/invoice_details/{task_id}", response_model=InvoiceResponseModel, tags=["invoices"]
+)
+async def get_invoice_details(
+    task_id: str, current_email: str = Depends(get_current_user)
+):
+    invoice = await db.get_invoice_by_task_id(task_id, auth_email=current_email)
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return invoice
@@ -91,60 +122,46 @@ async def get_invoice_details(task_id: str, request: Request):
 UPLOAD_DIR = pathlib.Path("tests")
 
 
-@app.post("/processInvoice")
-async def upload_file(request: Request, file: UploadFile = File(...)):
-    """
-    Accepts a file upload (e.g., PDF) and saves it to the 'uploads' directory.
-    """
+@app.post("/processInvoice", tags=["invoices"])
+async def upload_file(
+    file: UploadFile = File(...), current_email: str = Depends(get_current_user)
+):
     try:
-
-        file_path = UPLOAD_DIR / (str(uuid.uuid4()) + ".pdf")
-
-        # Save the file asynchronously
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = UPLOAD_DIR / (f"{uuid.uuid4()}.pdf")
         async with aiofiles.open(file_path, "wb") as buffer:
-            content = await file.read()  # Read file content
-            await buffer.write(content)  # Write to disk
-
-        logger.info(f"File saved to '{file_path}'")
-
-        await add_task_to_queue(str(file_path), request.headers["auth_email"])
-        return {
-            "saved_path": str(file_path),
-        }
+            content = await file.read()
+            await buffer.write(content)
+        logger.info("File saved to '%s'", file_path)
+        await add_task_to_queue(str(file_path), current_email)
+        return {"saved_path": str(file_path)}
     except Exception as e:
-        logger.error(f"Error uploading file: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not upload file: {e}")
+        logger.exception("Error uploading file")
+        raise HTTPException(
+            status_code=500, detail=f"Could not upload file: {e}"
+        ) from e
     finally:
         await file.close()
 
 
-# --- NEW: File Serving Route ---
-@app.get("/files/{filename}")
+@app.get("/files/{filename}", tags=["files"])
 async def get_file(filename: str):
-    """
-    Retrieves a previously uploaded file by its filename from the 'uploads' directory.
-    """
     try:
         file_path = UPLOAD_DIR / filename
-
-        # Security check: ensure file is within the UPLOAD_DIR
         if not file_path.resolve().is_relative_to(UPLOAD_DIR.resolve()):
             raise HTTPException(status_code=403, detail="Access denied")
-
-        if not os.path.exists(file_path) or not os.path.isfile(file_path):
-            logger.warning(f"File not found: {file_path}")
+        if not file_path.exists() or not file_path.is_file():
+            logger.warning("File not found: %s", file_path)
             raise HTTPException(status_code=404, detail="File not found")
-
-        logger.info(f"Serving file: {file_path}")
+        logger.info("Serving file: %s", file_path)
         return FileResponse(file_path)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error serving file: {e}")
-        if isinstance(e, HTTPException):
-            raise e  # Re-raise if it's already an HTTPException
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception("Error serving file")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-# --- Run the Application ---
 if __name__ == "__main__":
-    print("Starting Uvicorn server...")
+    logger.info("Starting Uvicorn server...")
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
