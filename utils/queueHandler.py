@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 # --- Task/Result Queue Definitions ---
 # A task is now just an ID and a file path
-ProcessTask = Tuple[str, pathlib.Path]
+ProcessTask = Tuple[str, pathlib.Path, str]
 # A result includes its ID, status, and the data (or error message)
-ProcessResult = Tuple[str, str, InvoiceExtractionSchema | str]
+ProcessResult = Tuple[str, str, InvoiceExtractionSchema | str, str]
 
 # --- Global Queues ---
 task_queue = asyncio.Queue[ProcessTask]()
@@ -27,7 +27,7 @@ result_queue = asyncio.Queue[ProcessResult]()
 # --- Public-Facing Functions ---
 
 
-async def add_task_to_queue(pdf_path_str: str) -> str:
+async def add_task_to_queue(pdf_path_str: str, auth_email: str) -> str:
     """
     Public function to add a new PDF processing task to the queue.
 
@@ -47,10 +47,12 @@ async def add_task_to_queue(pdf_path_str: str) -> str:
         raise FileNotFoundError(f"File not found: {pdf_path_str}")
 
     # The task is now much lighter, as requested.
-    task = (task_id, pdf_path)
+    task = (task_id, pdf_path, auth_email)
 
     await task_queue.put(task)
-    await db.add_invoice({"task_id": task_id, "pdf_path": pdf_path_str})
+    await db.add_invoice(
+        {"task_id": task_id, "pdf_path": pdf_path_str}, auth_email=auth_email
+    )
     logger.info(f"[Task {task_id}] Added to queue: {pdf_path.name}")
     return task_id
 
@@ -61,11 +63,13 @@ async def worker(name: str, extractor: InvoiceExtractor):
     Pulls tasks from task_queue, processes them, and puts results in result_queue.
     """
     logger.info(f"[{name}] Worker starting...")
+
     while True:
+        auth_email = ""
         task_id = None
         try:
             # 1. Get the light task (ID and path)
-            task_id, pdf_path = await task_queue.get()
+            task_id, pdf_path, auth_email = await task_queue.get()
 
             logger.info(f"[{name}] [Task {task_id}] Processing {pdf_path.name}...")
 
@@ -79,7 +83,7 @@ async def worker(name: str, extractor: InvoiceExtractor):
             )
 
             # 4. Put the full result on the result queue
-            await result_queue.put((task_id, "SUCCESS", extracted_data))
+            await result_queue.put((task_id, "SUCCESS", extracted_data, auth_email))
             logger.info(f"[{name}] [Task {task_id}] Finished {pdf_path.name}.")
 
         except Exception as e:
@@ -88,7 +92,7 @@ async def worker(name: str, extractor: InvoiceExtractor):
                     f"[{name}] [Task {task_id}] Unhandled error in worker: {e}",
                     exc_info=True,
                 )
-                await result_queue.put((task_id, "ERROR", str(e)))
+                await result_queue.put((task_id, "ERROR", str(e), auth_email))
             else:
                 logger.error(
                     f"[{name}] Worker failed before acquiring task: {e}", exc_info=True
@@ -108,8 +112,8 @@ async def result_processor():
     while True:
         task_id = None
         try:
-            task_id, status, data = await result_queue.get()
-            await handle_processed_result(task_id, status, data)
+            task_id, status, data, auth_email = await result_queue.get()
+            await handle_processed_result(task_id, status, data, auth_email)
         except Exception as e:
             if task_id:
                 logger.error(
@@ -148,13 +152,18 @@ async def run_service():
     result_task = asyncio.create_task(result_processor(), name="ResultProcessor")
 
     # --- Demo: Add initial tasks ---
+    auth_email = "techzorg48@gmail.com"
     logger.info("Adding demo tasks...")
     pdf_dir = pathlib.Path("tests")
     if pdf_dir.exists():
         demo_tasks = []
         for pdf_path in pdf_dir.glob("*.pdf"):
-            if not (await db.check_invoice_exists(str(pdf_path))):
-                demo_tasks.append(add_task_to_queue(str(pdf_path)))
+            if not (
+                await db.check_invoice_exists(str(pdf_path), auth_email=auth_email)
+            ):
+                demo_tasks.append(
+                    add_task_to_queue(str(pdf_path), auth_email=auth_email)
+                )
 
         if demo_tasks:
             await asyncio.gather(*demo_tasks)

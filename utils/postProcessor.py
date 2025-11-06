@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_processed_result(
-    task_id: str, status: str, data: InvoiceExtractionSchema | str
+    task_id: str, status: str, data: InvoiceExtractionSchema | str, auth_email: str
 ):
     """
     This is your callback function for every finished task.
@@ -38,7 +38,7 @@ async def handle_processed_result(
 
         # save to db
         logger.info(f"[Task {task_id}] Saving processed data to database...")
-        await db.update_invoice(task_id, data.model_dump())
+        await db.update_invoice(task_id, data.model_dump(), auth_email)
         logger.info(f"[Task {task_id}] Data for {data.invoice_id} saved.")
 
     elif status == "ERROR":
@@ -50,4 +50,5 @@ async def handle_processed_result(
                 "human_verification_required": True,
                 "human_verification_reason": data,
             },
+            auth_email,
         )

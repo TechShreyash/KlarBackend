@@ -1,9 +1,10 @@
 import asyncio
 import logging
 from typing import List, Tuple
+from utils.db import db
 
 logger = logging.getLogger(__name__)
-
+vendordb = db.vendordb
 
 VENDOR_DB: List[Tuple[str, str]] = [
     ("SuperStore Inc", "VEND_0001"),
