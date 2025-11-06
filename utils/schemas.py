@@ -1,4 +1,4 @@
-# schemas.py
+# utils/schemas.py
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
@@ -24,9 +24,7 @@ class InvoiceExtractionSchema(BaseModel):
     ship_mode: Optional[str] = Field(description="Shipping mode used for the invoice.")
     product_id: Optional[str] = Field(description="Normalized Product ID.")
     product_name: Optional[str] = Field(description="Name/description of the product.")
-
     quantity: int = Field(description="Quantity of the product.")
-
     unit_cost: float = Field(description="Unit cost of the product.")
     currency: Optional[str] = Field(description="3-letter ISO currency code.")
     sub_total: float = Field(description="Subtotal amount before discounts and fees.")
@@ -37,4 +35,7 @@ class InvoiceExtractionSchema(BaseModel):
     )
     human_verification_required: bool = Field(
         description="Flag indicating if human verification is needed."
+    )
+    human_verification_reason: Optional[str] = Field(
+        default=None, description="Brief reason why human verification is required."
     )
