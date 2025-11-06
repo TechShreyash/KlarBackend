@@ -58,6 +58,7 @@ async def get_root():
     return {"message": "Invoice API is running!"}
 
 
+
 @app.get("/getInvoices", response_model=List[InvoiceResponseModel])
 async def get_invoices(request: Request):
     """
@@ -71,4 +72,4 @@ async def get_invoices(request: Request):
 # --- Run the Application ---
 if __name__ == "__main__":
     print("Starting Uvicorn server...")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)

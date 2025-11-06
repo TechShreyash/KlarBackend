@@ -19,11 +19,23 @@ async def update_invoice(task_id: str, data: dict):
         if not data["human_verification_required"]
         else "requires_human_verification"
     )
+
+    # update year to current year if date is present
+    if "date" in data and data["date"]:
+        from datetime import datetime
+
+        current_year = datetime.now().year
+        date_parts = data["date"].split("-")
+        if len(date_parts) == 3:
+            data["date"] = f"{current_year}-{date_parts[1]}-{date_parts[2]}"
+
     await collection.update_one({"task_id": task_id}, {"$set": data})
+
 
 async def check_invoice_exists(pdf_path: str) -> bool:
     document = await collection.find_one({"pdf_path": pdf_path})
     return document is not None
+
 
 async def get_all_invoices():
     invoices = []
