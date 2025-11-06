@@ -23,7 +23,7 @@ class InvoiceExtractor:
     Each instance is tied to a specific API key.
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-1.5-flash-latest"):
+    def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
         # This synchronously sets up the client configuration
         self.client = genai.Client(api_key=api_key)
         self.model = model_name

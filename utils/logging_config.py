@@ -1,5 +1,3 @@
-# utils/logging_config.py
-
 import logging
 import sys
 
@@ -8,22 +6,32 @@ def setup_logging():
     """Configures the root logger."""
 
     # Configure the root logger
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)  # This is your app's default level
 
     # Remove any existing handlers
-    if logger.hasHandlers():
-        logger.handlers.clear()
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
 
     # Create a stream handler (console)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.INFO)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(
+        logging.INFO
+    )  # The handler processes all logs at INFO or higher
 
     # Create a formatter
     formatter = logging.Formatter(
         "%(asctime)s - [%(levelname)s] - %(name)s (%(funcName)s): %(message)s"
     )
-    handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
 
-    # Add the handler
-    logger.addHandler(handler)
+    # Add the handler to the root logger
+    root_logger.addHandler(console_handler)
+
+    # Silence noisy third-party loggers by setting their level to WARNING
+
+    logging.getLogger("google_genai").setLevel(logging.WARNING)
+    logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)

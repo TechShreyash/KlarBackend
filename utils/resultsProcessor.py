@@ -55,13 +55,7 @@ async def handle_processed_result(
         # (Your DB save logic here)
         logger.info(f"[Task {task_id}] Data for {data.invoice_id} saved.")
 
-        # 2. Check for human verification
-        if data.human_verification_required:
-            logger.warning(
-                f"[Task {task_id}] FLAG: Invoice {data.invoice_id} requires human review. "
-                f"Reason: {data.human_verification_reason}"
-            )
-            # E.g.: await db.flag_for_review(task_id, data.human_verification_reason)
+        logger.info(data)
 
     elif status == "ERROR":
         logger.error(f"[Task {task_id}] Processing FAILED. Error: {data}")
