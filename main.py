@@ -144,6 +144,18 @@ async def upload_file(
         await file.close()
 
 
+# human in loop
+@app.post("/updateInvoice", tags=["invoices"])
+async def update_invoice(data: dict, current_email: str = Depends(get_current_user)):
+    data = data["data"]
+    data["status"] = "completed"
+    data["human_verification_required"] = False
+    data["human_verification_reason"] = None
+    data.pop("file_link", None)
+    await db.update_invoice(data["task_id"], data, auth_email=current_email)
+    return {"message": "Invoice updated successfully"}
+
+
 @app.get("/files/{filename}", tags=["files"])
 async def get_file(filename: str):
     try:
