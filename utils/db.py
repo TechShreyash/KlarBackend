@@ -45,7 +45,9 @@ async def check_invoice_exists(pdf_path: str, auth_email: str) -> bool:
     )
     return document is not None
 
+
 from utils.schemas import InvoiceResponseModel
+
 
 async def get_all_invoices(auth_email: str) -> list:
     invoices = []
@@ -61,3 +63,18 @@ async def get_all_invoices(auth_email: str) -> list:
         except Exception:
             pass
     return invoices
+
+
+async def get_invoice_by_task_id(task_id: str, auth_email: str) -> dict | None:
+    document = await collection.find_one({"task_id": task_id, "auth_email": auth_email})
+    if document:
+        document.pop("_id", None)
+        document["file_link"] = (
+            f"{config.ROOT_URL}/files/{document['pdf_path'].split('/')[-1]}"
+        )
+        try:
+            InvoiceResponseModel.model_validate(document)
+            return document
+        except Exception:
+            return None
+    return None

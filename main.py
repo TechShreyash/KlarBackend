@@ -75,6 +75,19 @@ async def get_invoices(request: Request):
     return invoices
 
 
+@app.get("/invoice_details/{task_id}", response_model=InvoiceResponseModel)
+async def get_invoice_details(task_id: str, request: Request):
+    """
+    Retrieves details of a specific invoice by its task ID.
+    """
+    invoice = await db.get_invoice_by_task_id(
+        task_id, auth_email=request.headers["auth_email"]
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return invoice
+
+
 UPLOAD_DIR = pathlib.Path("tests")
 
 
