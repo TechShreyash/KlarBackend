@@ -39,3 +39,12 @@ class InvoiceExtractionSchema(BaseModel):
     human_verification_reason: Optional[str] = Field(
         default=None, description="Brief reason why human verification is required."
     )
+
+class InvoiceResponseModel(InvoiceExtractionSchema):
+    status: str = Field(description="Processing status of the invoice.")
+    pdf_path: Optional[str] = Field(
+        description="Path to the stored PDF of the invoice."
+    )
+    task_id: Optional[str] = Field(
+        description="Unique task identifier for tracking invoice processing."
+    )

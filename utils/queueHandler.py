@@ -153,7 +153,8 @@ async def run_service():
     if pdf_dir.exists():
         demo_tasks = []
         for pdf_path in pdf_dir.glob("*.pdf"):
-            demo_tasks.append(add_task_to_queue(str(pdf_path)))
+            if not (await db.check_invoice_exists(str(pdf_path))):
+                demo_tasks.append(add_task_to_queue(str(pdf_path)))
 
         if demo_tasks:
             await asyncio.gather(*demo_tasks)
