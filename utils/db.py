@@ -84,6 +84,7 @@ async def get_all_invoices(auth_email: str) -> list:
             InvoiceResponseModel.model_validate(document)
             invoices.append(document)
         except Exception:
+            print("Invalid invoice data:", document["task_id"])
             pass
     return invoices
 
