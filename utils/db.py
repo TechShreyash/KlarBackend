@@ -51,15 +51,15 @@ async def update_invoice(task_id: str, data: dict, auth_email: str):
         if not data.get("human_verification_required")
         else "requires_human_verification"
     )
-    if "date" in data and data["date"]:
-        from datetime import datetime
+    # if "date" in data and data["date"]:
+    #     from datetime import datetime
 
-        current_year = datetime.now().year
-        date_parts = data["date"].split("-")
-        if len(date_parts) == 3:
-            data["date"] = (
-                f"{current_year}-{max(int(date_parts[1]),10)}-{date_parts[2]}"
-            )
+    #     current_year = datetime.now().year
+    #     date_parts = data["date"].split("-")
+    #     if len(date_parts) == 3:
+    #         data["date"] = (
+    #             f"{current_year}-{max(int(date_parts[1]),10)}-{date_parts[2]}"
+    #         )
     await invoices_collection.update_one(
         {"task_id": task_id, "auth_email": auth_email}, {"$set": data}
     )
