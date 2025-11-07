@@ -1,5 +1,6 @@
 # main.py
 import asyncio
+import io
 import logging
 import os
 import pathlib
@@ -121,25 +122,99 @@ async def get_invoice_details(
 
 UPLOAD_DIR = pathlib.Path("tests")
 
+from PIL import Image
+
+
+# --- [NEW] Image Conversion Helper Function ---
+def convert_image_to_pdf(image_bytes: bytes) -> bytes:
+    """
+    Converts image bytes (JPG, PNG, etc.) into PDF bytes.
+    This is a blocking (CPU/memory-bound) function.
+    """
+    try:
+        # Open image from in-memory bytes
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # Handle images with transparency (e.g., PNGs)
+        if image.mode == "RGBA":
+            # Create a white background
+            bg = Image.new("RGB", image.size, (255, 255, 255))
+            # Paste the image onto the background, using alpha channel as mask
+            bg.paste(image, (0, 0), image)
+            image = bg
+        elif image.mode != "RGB":
+            # Convert other modes (like P, L) to RGB
+            image = image.convert("RGB")
+
+        # Save to an in-memory PDF
+        pdf_bytes_io = io.BytesIO()
+        image.save(pdf_bytes_io, format="PDF", resolution=100.0)
+        return pdf_bytes_io.getvalue()
+    except Exception as e:
+        logger.error(f"Error converting image to PDF: {e}")
+        # Re-raise to be caught by the route's exception handler
+        raise
+
 
 @app.post("/processInvoice", tags=["invoices"])
 async def upload_file(
     file: UploadFile = File(...), current_email: str = Depends(get_current_user)
 ):
+    """
+    Accepts a PDF or Image (JPG, PNG) upload.
+    If it's an image, it converts it to PDF before saving and queuing.
+    """
     try:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        # We always save as .pdf
         file_path = UPLOAD_DIR / (f"{uuid.uuid4()}.pdf")
+
+        # Read the entire file into memory
+        content = await file.read()
+        pdf_bytes_to_save = None
+
+        # Check the MIME type
+        if file.content_type == "application/pdf":
+            logger.info("PDF file detected. Saving directly.")
+            pdf_bytes_to_save = content
+
+        elif file.content_type in [
+            "image/jpeg",
+            "image/png",
+            "image/bmp",
+            "image/gif",
+            "image/webp",
+        ]:
+            logger.info(
+                f"Image file detected ({file.content_type}). Converting to PDF..."
+            )
+            # Run the blocking conversion in a separate thread
+            pdf_bytes_to_save = await asyncio.to_thread(convert_image_to_pdf, content)
+            logger.info("Image successfully converted to PDF.")
+
+        else:
+            logger.warning(f"Unsupported file type: {file.content_type}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file.content_type}. Please upload a PDF, JPG, or PNG.",
+            )
+
+        # Asynchronously write the final PDF bytes to disk
         async with aiofiles.open(file_path, "wb") as buffer:
-            content = await file.read()
-            await buffer.write(content)
+            await buffer.write(pdf_bytes_to_save)
+
         logger.info("File saved to '%s'", file_path)
         await add_task_to_queue(str(file_path), current_email)
+
         return {"saved_path": str(file_path)}
+
     except Exception as e:
+        # Use logger.exception to automatically include stack trace
         logger.exception("Error uploading file")
-        raise HTTPException(
-            status_code=500, detail=f"Could not upload file: {e}"
-        ) from e
+        # Don't leak internal error details to the client
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail="Could not process uploaded file.")
     finally:
         await file.close()
 
